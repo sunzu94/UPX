@@ -173,7 +173,9 @@ void PackHeader::putPackHeader(SPAN_S(byte) p) {
 bool PackHeader::decodePackHeaderFromBuf(SPAN_S(const byte) buf, int blen, unsigned pos) {
     int boff;
     unsigned err_mask = 0;
-    for (; (boff = find_le32(raw_bytes(buf, blen), blen, UPX_MAGIC_LE32));
+// Extra "0 !=" to pacify C4706: assignment within conditional expression
+// (Microsoft VisualStudio 2019 and VS2022)
+    for (; 0 != (boff = find_le32(raw_bytes(buf, blen), blen, UPX_MAGIC_LE32));
          ((boff += 4), (blen -= 4),     // after the found UPX_MAGIC_LE32
           (pos += boff), (buf += boff)) // and the bytes before it
     ) {

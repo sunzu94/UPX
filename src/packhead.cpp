@@ -174,8 +174,8 @@ bool PackHeader::decodePackHeaderFromBuf(SPAN_S(const byte) buf, int blen, unsig
     int boff;
     unsigned err_mask = 0;
     for (; (boff = find_le32(raw_bytes(buf, blen), blen, UPX_MAGIC_LE32));
-         ((boff += 4), (blen -= 4), // after the found UPX_MAGIC_LE32
-         (pos += boff), (buf += boff)) // and the bytes before it
+         ((boff += 4), (blen -= 4),     // after the found UPX_MAGIC_LE32
+          (pos += boff), (buf += boff)) // and the bytes before it
     ) {
         if (boff < 0)
             return false;

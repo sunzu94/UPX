@@ -564,26 +564,24 @@ int PackUnix::canUnpack()
         bufsize = fi->st_size();
     MemBuffer buf(bufsize);
 
-    fi->seek(-(off_t)bufsize, SEEK_END);
+    unsigned pos = fi->seek(-(off_t)bufsize, SEEK_END);
     fi->readx(buf, bufsize);
-    return find_overlay_offset(buf);
+    return find_overlay_offset(buf, pos);
 }
 
-int PackUnix::find_overlay_offset(MemBuffer const &buf)
+int PackUnix::find_overlay_offset(MemBuffer const &buf, unsigned pos)
 {
-    int const small = 32 + sizeof(overlay_offset);
     int const bufsize = buf.getSize();
-    int i = bufsize;
-    while (i > small && 0 == buf[--i]) { }
-    i -= small;
-    // allow incompressible extents
-    if (i < 0 || !getPackHeader(buf + i, bufsize - i, true))
+    if (!getPackHeader(buf, bufsize, true, pos))
         return false;
 
-    int l = ph.buf_offset + ph.getPackHeaderSize();
-    if (l < 0 || l + 4 > bufsize)
+    int l = ph.buf_offset + ph.getPackHeaderSize() - pos;
+    if (l < 0 || (l + 4) > bufsize)
         throwCantUnpack("file corrupted");
-    overlay_offset = get_te32(buf + i + l);
+    if ((4 + l) != bufsize) {
+        infoWarning("ignoring %d appended bytes", bufsize - (4 + l));
+    }
+    overlay_offset = get_te32(buf + l);
     if ((off_t)overlay_offset >= file_size)
         throwCantUnpack("file corrupted");
 

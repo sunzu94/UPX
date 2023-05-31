@@ -170,111 +170,144 @@ void PackHeader::putPackHeader(SPAN_S(byte) p) {
 //
 **************************************************************************/
 
-bool PackHeader::decodePackHeaderFromBuf(SPAN_S(const byte) buf, int blen) {
-    int boff = find_le32(raw_bytes(buf, blen), blen, UPX_MAGIC_LE32);
-    if (boff < 0)
-        return false;
-    blen -= boff; // bytes remaining in buf
-    if (blen < 20)
-        throwCantUnpack("header corrupted 1");
+bool PackHeader::decodePackHeaderFromBuf(SPAN_S(const byte) buf, int blen, unsigned pos) {
+    int boff;
+    unsigned err_mask = 0;
+    for (; (boff = find_le32(raw_bytes(buf, blen), blen, UPX_MAGIC_LE32));
+         ((boff += 4), (blen -= 4), // after the found UPX_MAGIC_LE32
+         (pos += boff), (buf += boff)) // and the bytes before it
+    ) {
+        if (boff < 0)
+            return false;
+        blen -= boff; // bytes remaining in buf after UPX_MAGIC_LE32
+        if (blen < 20) {
+            err_mask |= 1 << 1;
+            infoWarning("ignoring corrupt header at %#x", boff + pos);
+            continue;
+        }
 
-    SPAN_S_VAR(const byte, const p, buf + boff);
+        SPAN_S_VAR(const byte, const p, buf + boff);
 
-    version = p[4];
-    format = p[5];
-    method = p[6];
-    level = p[7];
-    filter_cto = 0;
+        version = p[4];
+        format = p[5];
+        method = p[6];
+        level = p[7];
+        filter_cto = 0;
 
-    if (opt->debug.debug_level) {
-        fprintf(stderr, "  decodePackHeaderFromBuf  version=%d  format=%d  method=%d  level=%d\n",
-                version, format, method, level);
-    }
-    if (!((format >= 1 && format <= UPX_F_W64PE_ARM64EC) ||
-          (format >= 129 && format <= UPX_F_DYLIB_PPC64))) {
-        throwCantUnpack("unknown format %d", format);
-    }
+        if (opt->debug.debug_level) {
+            fprintf(stderr,
+                    "  decodePackHeaderFromBuf  version=%d  format=%d  method=%d  level=%d\n",
+                    version, format, method, level);
+        }
+        if (!((format >= 1 && format <= UPX_F_W64PE_ARM64EC) ||
+              (format >= 129 && format <= UPX_F_DYLIB_PPC64))) {
+            err_mask |= 1 << 0;
+            infoWarning("ignoring bad format %d at %#x", format, boff + pos);
+            continue;
+        }
 
-    //
-    // decode the new variable length header
-    //
+        //
+        // decode the new variable length header
+        //
 
-    int off_filter = 0;
-    if (format < 128) {
-        u_adler = get_le32(p + 8);
-        c_adler = get_le32(p + 12);
-        if (format == UPX_F_DOS_COM || format == UPX_F_DOS_SYS) {
-            u_len = get_le16(p + 16);
-            c_len = get_le16(p + 18);
-            u_file_size = u_len;
-            off_filter = 20;
-        } else if (format == UPX_F_DOS_EXE || format == UPX_F_DOS_EXEH) {
-            if (blen < 25)
-                throwCantUnpack("header corrupted 6");
-            u_len = get_le24(p + 16);
-            c_len = get_le24(p + 19);
-            u_file_size = get_le24(p + 22);
-            off_filter = 25;
+        int off_filter = 0;
+        if (format < 128) {
+            u_adler = get_le32(p + 8);
+            c_adler = get_le32(p + 12);
+            if (format == UPX_F_DOS_COM || format == UPX_F_DOS_SYS) {
+                u_len = get_le16(p + 16);
+                c_len = get_le16(p + 18);
+                u_file_size = u_len;
+                off_filter = 20;
+            } else if (format == UPX_F_DOS_EXE || format == UPX_F_DOS_EXEH) {
+                if (blen < 25) {
+                    err_mask |= 1 << 6;
+                    infoWarning("ignoring corrupt header 6 at %#x", boff + pos);
+                    continue;
+                }
+                u_len = get_le24(p + 16);
+                c_len = get_le24(p + 19);
+                u_file_size = get_le24(p + 22);
+                off_filter = 25;
+            } else {
+                if (blen < 31) {
+                    err_mask |= 1 << 7;
+                    infoWarning("ignoring corrupt header 7 at %#x", boff + pos);
+                    continue;
+                }
+                u_len = get_le32(p + 16);
+                c_len = get_le32(p + 20);
+                u_file_size = get_le32(p + 24);
+                off_filter = 28;
+                filter_cto = p[29];
+                n_mru = p[30] ? 1 + p[30] : 0;
+            }
         } else {
-            if (blen < 31)
-                throwCantUnpack("header corrupted 7");
-            u_len = get_le32(p + 16);
-            c_len = get_le32(p + 20);
-            u_file_size = get_le32(p + 24);
+            if (blen < 31) {
+                err_mask |= 1 << 8;
+                infoWarning("ignoring corrupt header 8 at %#x", boff + pos);
+                continue;
+            }
+            u_len = get_be32(p + 8);
+            c_len = get_be32(p + 12);
+            u_adler = get_be32(p + 16);
+            c_adler = get_be32(p + 20);
+            u_file_size = get_be32(p + 24);
             off_filter = 28;
             filter_cto = p[29];
             n_mru = p[30] ? 1 + p[30] : 0;
         }
-    } else {
-        if (blen < 31)
-            throwCantUnpack("header corrupted 8");
-        u_len = get_be32(p + 8);
-        c_len = get_be32(p + 12);
-        u_adler = get_be32(p + 16);
-        c_adler = get_be32(p + 20);
-        u_file_size = get_be32(p + 24);
-        off_filter = 28;
-        filter_cto = p[29];
-        n_mru = p[30] ? 1 + p[30] : 0;
+
+        if (version >= 10) {
+            if (blen < off_filter + 1) {
+                err_mask |= 1 << 9;
+                infoWarning("ignoring corrupt header 9 at %#x", boff + pos);
+                continue;
+            }
+            filter = p[off_filter];
+        } else if ((level & 128) == 0)
+            filter = 0;
+        else {
+            // convert old flags to new filter id
+            level &= 127;
+            if (format == UPX_F_DOS_COM || format == UPX_F_DOS_SYS)
+                filter = 0x06;
+            else
+                filter = 0x26;
+        }
+        level &= 15;
+
+        //
+        // now some checks
+        //
+
+        if (version == 0xff)
+            throwCantUnpack("cannot unpack UPX ;-)");
+        // check header_checksum
+        if (version >= 10) {
+            int size = getPackHeaderSize(); // expected; based on format and version
+            if (size > blen || p[size - 1] != get_packheader_checksum(p, size - 1)) {
+                err_mask |= 1 << 3;
+                infoWarning("ignoring corrupt header 3 at %#x", boff + pos);
+                continue;
+            }
+        }
+        if (c_len < 2 || u_len < 2 || !mem_size_valid_bytes(c_len) ||
+            !mem_size_valid_bytes(u_len)) {
+            err_mask |= 1 << 4;
+            infoWarning("ignoring corrupt header 4 at %#x", boff + pos);
+            continue;
+        }
+
+        //
+        // success
+        //
+
+        this->buf_offset = boff + pos;
+        return true;
     }
-
-    if (version >= 10) {
-        if (blen < off_filter + 1)
-            throwCantUnpack("header corrupted 9");
-        filter = p[off_filter];
-    } else if ((level & 128) == 0)
-        filter = 0;
-    else {
-        // convert old flags to new filter id
-        level &= 127;
-        if (format == UPX_F_DOS_COM || format == UPX_F_DOS_SYS)
-            filter = 0x06;
-        else
-            filter = 0x26;
-    }
-    level &= 15;
-
-    //
-    // now some checks
-    //
-
-    if (version == 0xff)
-        throwCantUnpack("cannot unpack UPX ;-)");
-    // check header_checksum
-    if (version >= 10) {
-        int size = getPackHeaderSize(); // expected; based on format and version
-        if (size > blen || p[size - 1] != get_packheader_checksum(p, size - 1))
-            throwCantUnpack("header corrupted 3");
-    }
-    if (c_len < 2 || u_len < 2 || !mem_size_valid_bytes(c_len) || !mem_size_valid_bytes(u_len))
-        throwCantUnpack("header corrupted 4");
-
-    //
-    // success
-    //
-
-    this->buf_offset = boff;
-    return true;
+    infoWarning("good header not found; err_mask=%#x", err_mask);
+    return false;
 }
 
 /* vim:set ts=4 sw=4 et: */

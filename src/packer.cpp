@@ -640,9 +640,9 @@ int Packer::patchPackHeader(void *b, int blen) {
     return boff;
 }
 
-bool Packer::getPackHeader(const void *b, int blen, bool allow_incompressible) {
+bool Packer::getPackHeader(const void *b, int blen, bool allow_incompressible, unsigned pos) {
     auto bb = (const byte *) b;
-    if (!ph.decodePackHeaderFromBuf(SPAN_S_MAKE(const byte, bb, blen), blen))
+    if (!ph.decodePackHeaderFromBuf(SPAN_S_MAKE(const byte, bb, blen), blen, pos))
         return false;
 
     if (ph.version > getVersion())

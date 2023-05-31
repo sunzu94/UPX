@@ -47,7 +47,7 @@ class PackHeader final {
     PackHeader();
 
     void putPackHeader(SPAN_S(byte) p);
-    bool decodePackHeaderFromBuf(SPAN_S(const byte) b, int blen);
+    bool decodePackHeaderFromBuf(SPAN_S(const byte) b, int blen, unsigned pos = 0);
 
 public:
     int getPackHeaderSize() const;
@@ -198,7 +198,7 @@ protected:
 
     // packheader handling
     virtual int patchPackHeader(void *b, int blen);
-    virtual bool getPackHeader(const void *b, int blen, bool allow_incompressible = false);
+    virtual bool getPackHeader(const void *b, int blen, bool allow_incompressible = false, unsigned pos = 0);
     virtual bool readPackHeader(int len, bool allow_incompressible = false);
     virtual void checkAlreadyPacked(const void *b, int blen);
 

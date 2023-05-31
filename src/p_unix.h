@@ -57,7 +57,7 @@ public:
 
     virtual bool canPack() override;
     virtual int  canUnpack() override; // bool, except -1: format known, but not packed
-    int find_overlay_offset(MemBuffer const &buf);
+    int find_overlay_offset(MemBuffer const &buf, unsigned pos);
 
 protected:
     // called by the generic pack()

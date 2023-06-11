@@ -93,60 +93,59 @@ arg6w .req w5
 
         .balign 4
 _start: .globl _start
-        nop  // bkpt // DEBUG
+L000: b L000  //  nop  // bkpt // DEBUG
         PUSH4 (x0,x1,x2,lr)  // MATCH_00
 
-        sub sp,sp,#2*NBPW  // space for ADRU, LENU
-F_ADRU= 0 * NBPW
-F_LENU= 1 * NBPW
-F_ARGC= 2 * NBPW
+        sub sp,sp,#4*NBPW  // space for ADRU, LENU
+F_MFD=  0 * NBPW
+F_ADRU= 2 * NBPW
+F_LENU= 3 * NBPW
 
-        bl L70
-L70_ret:
-    foldi   .req lr
-    old_sp  .req x14  // busy: lr,x14
-        mov old_sp,sp
-        ldr w0,[foldi,#sz_unc]
-        str x0,[old_sp,#F_LENU]
-        sub x0,sp,x0  // alloca
-        and sp,x0,#-2*NBPW  // align stack
-
-        add arg4,old_sp,#F_LENU  // &dstlen
-        mov arg3,sp  // dst for decompress
-        ldr arg2w,[foldi,#sz_cpr]  // srclen
-        add arg1,foldi,#sz_b_info  // src
-    .unreq foldi  // busy: x14
-        bl f_decompress
+O_ARGC= 4 * NBPW
 
         mov arg2w,#0
         adr arg1,str_upx
-    mfd     .req w15  // busy: x15,x14
-        do_sys __NR_memfd_create; mov mfd, w0
+        do_sys __NR_memfd_create; str w0,[sp,#F_MFD]
 
-        mov arg2,sp
-        ldr arg3,[old_sp,#F_LENU]
+        bl L70
+L70_ret:
+    foldi   .req lr  // &fold_info
+        add arg4,sp,#F_LENU  // &dstlen (IN and OUT for f_decompress)
+        ldr arg2w,[foldi,#sz_cpr]  // srclen
+        add arg1,foldi,#sz_b_info  // src
+        ldr w7,[foldi,#sz_unc]
+        str w7,[sp,#F_LENU]
+    .unreq foldi
+
+    old_sp  .req x15  //
+        mov old_sp,sp
+        sub x7,sp,x7  // alloca
+        and sp,x7,#-2*NBPW  // align stack
+        mov arg3,sp  // dst for decompress
+        bl f_decompress
+
+        ldr arg3w,[old_sp,#F_LENU]
+        mov arg2,sp  // &unfolded
+        ldr arg1w,[old_sp,#F_MFD]
         do_sys __NR_write
-        mov sp,old_sp  // de-alloca
-    .unreq old_sp  // busy: x15
+        mov sp,old_sp  // un_alloca
+    .unreq old_sp
 
-        mov arg6,#0  // beginning of file
-        mov arg5w,mfd
+        mov arg6w,#0  // beginning of file
+        ldr arg5w,[sp,#F_MFD]
         mov arg4w,#MAP_PRIVATE  // modes
         mov arg3w,#PROT_READ|PROT_EXEC  // prot
-        ldr arg2,[sp,#F_LENU]
+        ldr arg2w,[sp,#F_LENU]
         mov arg1,#0  // addr (kernel chooses)
         do_sys __NR_mmap; str x0,[sp,#F_ADRU]
-    u_ptr   .req x14  // busy: x15,x14
-        mov u_ptr,x0
 
-        mov arg1w,mfd
-    .unreq mfd  // busy: x14
+        ldr arg1,[sp],#2*NBPW  // mfd; sp= &F_ADRU
         do_sys __NR_close
 
-        adr arg1,_start - 4*4  // &SO_INFO
-        add arg2,sp,#F_ARGC  // &{argc, argv, envp}
-        br u_ptr
-        .unreq u_ptr
+        adr arg1,_start -4 *4  // &SO_INFO
+        add arg2,sp,#O_ARGC - 2*NBPW
+        ldr x15,[sp,#F_ADRU - 2*NBPW]
+        br x15  // invoke folded code
 
 str_upx:
         .asciz "upx"

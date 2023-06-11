@@ -140,60 +140,63 @@ _start: .globl _start  // in Thumb mode  (via PackLinuxElf32::pack3)
         bx pc; nop  // but switch to ARM until debugged
         .arm
         nop
+
+L000:   b L000  // deliberate infinite loop to wait for gdb to attach
+
 #if 0|DEBUG  //{
         bkpt  // DEBUG
 #endif  //}
         // argc,argv,envp, r3 convenience, r4-r7 callee-saved, lr ret_addr
         stmfd sp!,{r0,r1,r2, r3, r4,r5,r6,r7, lr}  // MATCH_99
 
-        sub sp,sp,#2*NBPW  // space for ADRU, LENU
-F_ADRU= 0 * NBPW
-F_LENU= 1 * NBPW
-F_ARGC= 2 * NBPW
+        sub sp,sp,#3*NBPW  // space for locals
+F_MFD=  0 * NBPW
+F_ADRU= 1 * NBPW
+F_LENU= 2 * NBPW
+O_ARGC= 3 * NBPW
+
+        mov arg2,#0
+        adr arg1,str_upx
+        do_sys7t2 __NR_memfd_create; str r0,[sp,#F_MFD]
 
         call4 L70
 L70_ret:
     foldi   .req lr  // &fold_info
-    old_sp  .req r5  // busy: lr,r5
-        mov old_sp,sp
-        ldr r0,[foldi,#sz_unc]
-        str r0,[old_sp,#F_LENU]
-        sub r0,sp,r0  // alloca
-        and sp,r0,#-2*NBPW  // align stack
-
-        add arg4,old_sp,#F_LENU  // &dstlen
-        mov arg3,sp  // dst for decompress
+        add arg4,sp,#F_LENU  // &dstlen (IN and OUT for f_decompress)
         ldr arg2,[foldi,#sz_cpr]  // srclen
         add arg1,foldi,#sz_b_info  // src
-    .unreq foldi  // busy: r5
+        ldr r7,[foldi,#sz_unc]
+        str r7,[sp,#F_LENU]
+    .unreq foldi
+
+    old_sp  .req r6  // do_sys uses r7; r6 NOT used by arch/arm/v4a/nrv2b_d8.S
+        mov old_sp,sp
+        sub r7,sp,r7  // alloca
+        and sp,r7,#-2*NBPW  // align stack
+        mov arg3,sp  // dst for decompress
         bl f_decompress
 
-        mov arg2,#0
-        adr arg1,str_upx
-    mfd     .req r6  // busy: r6,r5
-        do_sys7t2 __NR_memfd_create; mov mfd,r0
-
-        mov arg2,sp
         ldr arg3,[old_sp,#F_LENU]
+        mov arg2,sp  // &unfolded
+        ldr arg1,[old_sp,#F_MFD]
         do_sys __NR_write
-        mov sp,old_sp  // de-alloca
-    .unreq old_sp  // busy: r6
+        mov sp,old_sp  // un_alloca
+    .unreq old_sp
 
         mov arg6,#0  // beginning of file
-        mov arg5,mfd
+        ldr arg5,[sp,#F_MFD]
         mov arg4,#MAP_PRIVATE  // modes
         mov arg3,#PROT_READ|PROT_EXEC  // prot
         ldr arg2,[sp,#F_LENU]
         mov arg1,#0  // addr (kernel chooses)
         do_sys __NR_mmap64; str r0,[sp,#F_ADRU]
 
-        mov arg1,mfd
-    .unreq mfd  // busy: empty
+        ldr arg1,[sp],#NBPW  // mfd (F_MFD popped)
         do_sys __NR_close
 
         adr r0,_start -4 *NBPW  // &SO_INFO
-        add r1,sp,#F_ARGC
-        ldr pc,[sp, #F_ADRU]  // invoke folded code
+        add r1,sp,#O_ARGC - NBPW
+        ldr pc,[sp, #F_ADRU - NBPW]  // invoke folded code
 
 str_upx:
         .asciz "upx"
